@@ -1,0 +1,31 @@
+<project name="intertubes" basedir="." default="war">
+	<property name="build.dir" value="WEB-INF/classes" />
+	<property name="source.dir" value="src" />
+	<property name="lib.dir" value="WEB-INF/lib" />
+	<property name="servlet.jar" value="lib/servlet-api-2.5-20081211.jar"/>
+	<property name="warfile" value="intertubes.war" />
+	
+	<target name="compile">
+		<java classname="clojure.lang.Compile">
+			<classpath>
+				<path location="${build.dir}"/>
+				<path location="${source.dir}"/>
+				<path location="${servlet.jar}"/>
+				<fileset dir="${lib.dir}">
+					<include name="*.jar"/>
+				</fileset>
+			</classpath>
+			<sysproperty key="clojure.compile.path" value="${build.dir}"/>
+			<arg value="intertubes"/>
+		</java>
+	</target>
+	
+	<target name="war" depends="compile">
+		<war warfile="${warfile}" webxml="WEB-INF/web.xml">
+			<classes dir="${build.dir}"/>
+			<lib dir="${lib.dir}">
+				<include name="*.jar"/>
+			</lib>
+		</war>
+	</target>
+</project>
