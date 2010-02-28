@@ -7,6 +7,6 @@ a                                  { text-decoration : dashed; }
 .error,.success                    { padding : 1em; }
 .error                             { background-color : #ff9999; border : 2px solid red;}
 .success                           { background-color : #99ff99; border : 2px solid green;}
-.footer                            { text-align : center; font-size : 90%;
+.footer                            { text-align : center; font-size : 90%; margin-top : 1em;
                                      border-top : 1px solid gray; padding : 1em;}
 .footer a                          { color : grey;}
