@@ -1,6 +1,8 @@
 (ns intertubes
   (:use compojure)
-  (:require [clojure.contrib.sql :as sql])
+  (:require [clojure.contrib
+             [sql :as sql]
+             [seq-utils :as seq]])
   (:gen-class
    :extends javax.servlet.http.HttpServlet))
 
@@ -15,25 +17,44 @@
 
 (def db {:name "java:/comp/env/jdbc/intertubes"})
 
-(defn basic-page [title & body]
-  (html
-   [:html
-    [:head [:title title]]
-    [:body
-     [:h1 "The Intertubes"]
-     body]]))
+(defn preview-enabled [request]
+  (= (-> request :cookies :preview) "true"))
 
-(defn create-page []
-  (basic-page "Create"
-             [:form {:method "post" :action "/create"}
-              [:input {:name "url"}]]))
+(defn basic-page [request title & body]
+  (let [preview-links (cond (preview-enabled request)
+                            (link-to "/disable-preview" "Disable Preview")
 
-(defn success-page [slug url]
-  (let [slug-url (str base-url "/" slug)]
-    (basic-page "Created"
-      [:h3 (link-to slug-url slug-url)]
-      [:p "now redirects to"]
-      [:h3 url])))
+                            :else
+                            (link-to "/enable-preview" "Enable Preview"))]
+    (html
+     [:html
+      [:head
+       [:title title " - the.intertub.es"]
+       (include-css "/style.css")]
+      [:body
+       [:div {:class "divitis"}
+        [:h1 "The Intertubes"]
+        body
+        [:div {:class "footer"} preview-links]]]])))
+
+(defn link-slug [slug]
+  (let [x (str base-url "/" slug)]
+    (link-to x x)))
+
+(defn create-page [request]
+  (basic-page request "create"
+              [:form {:method "post" :action "/create"}
+               [:input {:name "url"}]]))
+
+(defn success-page
+  ([request title slug url]
+     (success-page request title slug url "now redirects to" "success"))
+  ([request title slug url text class]
+     (basic-page request title
+       [:div {:class class}
+        [:h3 (link-slug slug)]
+        [:p text]
+        [:h3 (link-to url url)]])))
 
 (defn taken? [slug]
   (sql/with-query-results res
@@ -53,7 +74,7 @@
 (defn prefix? [xs ys]
   (cond (and (not-empty xs) (not-empty ys)
              (= (first xs) (first ys)))
-        (prefix? (rest xs) (rest ys))
+        (recur (rest xs) (rest ys))
 
         (empty? xs)
         true
@@ -62,45 +83,67 @@
         false))
 
 (defn url-filter [url]
-  (str (cond (not (or (prefix? "http://" url) (prefix? "https://" url)))
-             "http://"
+  (cond (not (seq/includes? url \.))
+        nil
 
-             true nil)
-       url))
+        :else
+        (str (cond (not (or (prefix? "http://" url) (prefix? "https://" url)))
+                   "http://"
+
+                   :else nil)
+             url)))
 
 
 (defn add-url [request]
   (let [url (url-filter (-> request :params :url))
-        ip (:remote-addr request)]
+        ip  (:remote-addr request)]
     (cond (not url)
-          (basic-page "Invalid" [:p "Cannot link to that URL"])
+          (basic-page request "Invalid" [:p {:class "error"} "Cannot link to that URL"])
 
           true
           (sql/with-connection db
             (let [existing (lookup-url url)]
               (cond existing
-                    (success-page (existing :slug) (existing :url))
+                    (success-page request "created" (existing :slug) (existing :url))
 
-                    true
+                    :else
                     (let [link-name (first (drop-while #(taken? %)
                                                        (take 5 (repeatedly generate-link-name))))]
-                      (sql/insert-values "links" ["slug", "url", "creator"] [link-name url ip])
-                      (success-page link-name url))))))))
+                      (sql/insert-values "links" ["slug" "url" "creator"] [link-name url ip])
+                      (success-page request "created" link-name url))))))))
 
 (defn record-redirect [request slug]
-  (let [ip (:remote-addr request)
+  (let [ip      (:remote-addr request)
         referer (get (:headers request) "referer")]
-    (sql/insert-values "hits" ["ip","referer","slug"] [ip referer slug])))
+    (sql/insert-values "hits" ["ip" "referer" "slug"] [ip referer slug])))
+
+(defn with-resolved-url [request f]
+  (let [slug (-> request :route-params :slug)]
+    (sql/with-connection db
+      (let [redir (lookup-slug slug)
+            url   (:url redir)]
+        (cond (not redir) (basic-page request "error" [:p {:class "error"} "No such short url " \" slug \" ])
+              :else       (f slug url))))))
 
 
 (defn redirect [request]
-  (let [slug (-> request :route-params :slug)]
-    (sql/with-connection db
-      (let [redir (lookup-slug slug)]
-        (cond redir (do
-                      (record-redirect request slug)
-                      (redirect-to (redir :url)))
-              true (basic-page "Error" [:p "No such url"]))))))
+  (with-resolved-url request
+    (fn [slug url]
+      (record-redirect request slug)
+      (cond (preview-enabled request)
+            (success-page request "preview" slug url "redirects to" "preview")
+
+            :else
+            (redirect-to url)))))
+
+(defn set-preview [to]
+  {:status 302 :headers {"Location" "/"
+                         "Set-Cookie" (str "preview=" to "; path=/")}})
+
+(defn preview [request]
+  (with-resolved-url request
+    (fn [slug url]
+      (success-page request "preview" slug url "redirects to" "preview"))))
 
 (def slug-parts "1234567890asdfghijklmnopqrstuvwxyz")
 (def slug-size 6)
@@ -110,11 +153,23 @@
                    (let [l (count slug-parts)]
                      (repeatedly #(nth slug-parts (rand-int l)))))))
 
+(defn serve-resource [filename]
+  (fn [request]
+    (or (.getResourceAsStream (:servlet-context request) (str "/public/" filename))
+        "fail")))
+
 (defroutes intertubes-app
-  (GET "/create" (create-page))
-  (POST "/create" add-url)
-  (GET "/:slug" redirect)
-  (GET "/" (create-page)))
+  (GET "/style.css"                (serve-resource "style.css"))
+  (GET "/create"                   create-page)
+  (GET "/enable-preview"           (set-preview "true"))
+  (GET "/disable-preview"          (set-preview "false"))
+  (POST "/create"                  add-url)
+  (GET "/preview/:slug"            preview)
+  (GET "/:slug"                    redirect)
+  (GET "/"                         create-page)
+  (ANY "*"                         (fn [r]
+                                     {:status 404
+                                      :body (basic-page r "error: 404" [:p {:class "error"} "Page not found"])})))
 
 (defservice intertubes-app)
 

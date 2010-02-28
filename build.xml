@@ -23,6 +23,9 @@
 	<target name="war" depends="compile">
 		<war warfile="${warfile}" webxml="WEB-INF/web.xml">
 			<classes dir="${build.dir}"/>
+			<fileset dir=".">
+				<include name="public/**"/>
+			</fileset>
 			<lib dir="${lib.dir}">
 				<include name="*.jar"/>
 			</lib>
