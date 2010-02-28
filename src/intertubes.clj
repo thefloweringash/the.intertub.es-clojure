@@ -156,7 +156,7 @@
 (defn serve-resource [filename]
   (fn [request]
     (or (.getResourceAsStream (:servlet-context request) (str "/public/" filename))
-        "fail")))
+        (serve-file filename))))
 
 (defroutes intertubes-app
   (GET "/style.css"                (serve-resource "style.css"))
