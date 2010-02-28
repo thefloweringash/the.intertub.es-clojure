@@ -15,19 +15,6 @@
 
 (def db {:name "java:/comp/env/jdbc/intertubes"})
 
-(defn seq-to-str [s]
-  (new String (char-array s)))
-
-(defn sql-query [query]
-  (sql/with-connection db
-    (sql/with-query-results res
-      query
-      (into [] res))))
-
-(defn sql-query! [query]
-  (sql/with-connection db
-    query))
-
 (defn basic-page [title & body]
   (html
    [:html
@@ -42,7 +29,7 @@
               [:input {:name "url"}]]))
 
 (defn success-page [slug url]
-  (let [slug-url (seq-to-str (concat base-url "/" slug))]
+  (let [slug-url (str base-url "/" slug)]
     (basic-page "Created"
       [:h3 (link-to slug-url slug-url)]
       [:p "now redirects to"]
@@ -75,13 +62,11 @@
         false))
 
 (defn url-filter [url]
-  (seq-to-str
-   (concat
-    (cond (not (or (prefix? "http://" url) (prefix? "https://" url)))
-          "http://"
+  (str (cond (not (or (prefix? "http://" url) (prefix? "https://" url)))
+             "http://"
 
-          true '())
-    url)))
+             true nil)
+       url))
 
 
 (defn add-url [request]
@@ -121,9 +106,9 @@
 (def slug-size 6)
 
 (defn generate-link-name []
-  (seq-to-str (take slug-size
-                    (let [l (count slug-parts)]
-                      (repeatedly #(nth slug-parts (rand-int l)))))))
+  (apply str (take slug-size
+                   (let [l (count slug-parts)]
+                     (repeatedly #(nth slug-parts (rand-int l)))))))
 
 (defroutes intertubes-app
   (GET "/create" (create-page))
